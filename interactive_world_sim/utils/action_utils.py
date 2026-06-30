@@ -569,6 +569,32 @@ def joint_pos_to_action_primitive(
                 MASTER_GRIPPER_JOINT_NORMALIZE_FN(joint_pos[rob_i * 7 + 6])
             )  # Gripper position
         actions = action[None]
+    elif ctrl_mode == "bimanual_fold":
+        # Same EEF representation as bimanual_rope (per-arm world-frame XYZ + gripper),
+        # but with a workspace clip box fitted to the qcez folding data (robot frame,
+        # identity base). Bounds = measured EEF range (episode 0) + margin, so real
+        # actions are never clipped; the box only guards out-of-range control input.
+        # See PIPELINE_PLAN.md "Decision log" — EEF action fork.
+        action = np.zeros(8)
+        # (right x, right y, right z, right_gripper,
+        # left x, left y, left z, left_gripper)
+        for rob_i in range(num_robots):
+            fk_joint_pos = joint_pos[rob_i * 7 : (rob_i + 1) * 7]
+            fk_joint_pos = np.concatenate([fk_joint_pos, fk_joint_pos[-1:]])
+            rob_t_eef = kin_helper.compute_fk_from_link_idx(
+                fk_joint_pos, [kin_helper.sapien_eef_idx]
+            )[0]
+            rob_t_eef[0, 3] = np.clip(rob_t_eef[0, 3], 0.28, 0.66)
+            rob_t_eef[1, 3] = np.clip(rob_t_eef[1, 3], -0.45, 0.48)
+            world_t_robot = base_pose_in_world[rob_i]
+            world_t_eef = world_t_robot @ rob_t_eef
+
+            action[rob_i * 4 : rob_i * 4 + 3] = world_t_eef[:3, 3]
+            action[rob_i * 4 + 2] = np.clip(action[rob_i * 4 + 2], -0.48, 0.02)
+            action[rob_i * 4 + 3] = PUPPET_GRIPPER_JOINT_UNNORMALIZE_FN(
+                MASTER_GRIPPER_JOINT_NORMALIZE_FN(joint_pos[rob_i * 7 + 6])
+            )  # Gripper position
+        actions = action[None]
     elif ctrl_mode == "single_chain_in_box":
         action = np.zeros(4)
         for rob_i in range(1):

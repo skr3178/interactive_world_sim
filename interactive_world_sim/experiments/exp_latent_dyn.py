@@ -21,6 +21,7 @@ class LatentDynExperiment(BaseLightningExperiment):
     compatible_datasets = dict(
         sim_aloha_dataset=SimAlohaDataset,
         real_aloha_dataset=RealAlohaDataset,
+        folding_dataset=RealAlohaDataset,  # qcez folding (ALOHA), bimanual_fold EEF mode
     )
 
     def _build_dataset(self, split: str) -> Optional[torch.utils.data.Dataset]:

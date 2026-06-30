@@ -298,7 +298,7 @@ def kybd_action_to_rob_action(delta_action: np.ndarray, scene: str) -> np.ndarra
 @app.websocket("/ws")
 async def ws_endpoint(ws: WebSocket) -> None:
     await ws.accept()
-    scene = "pusht"
+    scene = "bimanual_rope_cam_0"
     resolution, model, normalizer, curr_latent_tensor, curr_action = load_task_config(
         scene=scene
     )
