@@ -96,6 +96,49 @@ qcez's **models are policies** (`pi0`, ACT/LoRA, `value_function`), not world mo
 
 ---
 
+## 2b. Dataset selection criteria (for future datasets)
+
+Distilled from the folding run — check these *before* committing to a dataset, in priority order.
+
+1. **TYPE: play, not demonstration — the #1 criterion.** *Play* = broad exploratory interaction
+   covering off-manifold states (failures, recoveries, varied speeds/contacts/positions). *Demo* =
+   narrow successful trajectories only. A world model must be accurate everywhere a policy/rollout
+   might go; demos cover only the success manifold. **Not fixable by more demos** (denser same tube,
+   not wider). Our folding data is demo → this is our quality ceiling.
+2. **Coverage > count.** Judge by how much of the state×action space is covered, not raw episode/
+   frame count. A narrow ("wrong type") dataset stays limited at any size.
+3. **Long rollouts amplify the coverage need.** The longer the intended rollout, the more binding
+   play-coverage becomes — long autoregressive rollouts wander off-manifold and collapse without it.
+   Minute-long stable rollouts effectively *require* play data; demo data may only support a few
+   seconds. (Architecture — Diffusion Forcing + context-noise — is built for long rollouts; data is
+   the limiter, not the model. See §5/D2 and the Stage-2 notes.)
+4. **Quantity target.** Paper ≈ **600 play eps/task** (~200 steps, ~6 h). Empirically: ~45 demo eps
+   plateaued (Stage-1 PSNR ~20); **~200 reached near-perfect Stage-1** (PSNR ~35). Stage-2 dynamics
+   needs more (we sit ~60% of the paper's per-task data). Aim for a **few hundred episodes** minimum.
+5. **Inputs present: RGB + action vectors.** The model consumes only per-frame RGB + an action
+   vector. Reject vision-only datasets (some "folding" sets have no actions → unusable).
+6. **Action representation.** Prefer **position-target** actions (EEF pose): they subsample losslessly
+   for rate-matching (D2) and map cleanly to keyboard EEF control. **Velocity/delta** actions can't be
+   subsampled (force the 40-dim concat). Low-dim/constrained action spaces are easier to learn from
+   limited data.
+7. **Embodiment fit.** Same robot family as the repo (**ALOHA**) = least porting (7-joints/arm +
+   gripper + trossen FK assumed). A different make (SO-101 6-DOF, Franka) needs code changes (drop the
+   `%7` assumptions, supply URDF/FK).
+8. **Frame rate.** Target ~10 Hz *effective* dynamics. Higher-fps (our 50) is fine but redundant →
+   `skip_frame` so there's real motion per step. Very-low-fps may be too coarse.
+9. **Cameras.** 1 **static external** view is enough (matches the paper's per-camera checkpoints).
+   Avoid relying on wrist/egocentric cameras — they move with the arm → much harder to model.
+10. **Task difficulty.** Deformable (cloth/rope) is hardest (occlusion, high-dim state); rigid
+    pick-place is easiest. Match task ambition to data scale + type.
+11. **Bonus: matched policy.** A dataset shipping a paired trained policy (e.g. qcez's fold-cloth
+    checkpoint) enables the full eval-loop demo (train WM → evaluate that policy *inside* it).
+
+**One-line filter:** *play-type, position-target actions, ALOHA-family, ≥ a few hundred episodes,
+1 static camera, RGB+action present — and the more you want long rollouts, the more play-coverage is
+non-negotiable.*
+
+---
+
 ## 3. Data-format facts (established)
 
 **What the iws model consumes:** per timestep `[RGB frame(s) (3,128,128) normalized] + [action vector (action_dim,)]`.

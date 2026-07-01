@@ -25,9 +25,12 @@ run_dir = sys.argv[1].rstrip("/")
 ckpt = sys.argv[2] if len(sys.argv) > 2 else sorted(glob.glob(f"{run_dir}/checkpoints/*.ckpt"))[-1]
 ep_idx = int(sys.argv[3]) if len(sys.argv) > 3 else 0
 max_frames = int(sys.argv[4]) if len(sys.argv) > 4 else 200
-device = "cuda"
+device = sys.argv[5] if len(sys.argv) > 5 else "cuda"   # 'cpu' to avoid touching a training GPU
+roll_len = int(sys.argv[6]) if len(sys.argv) > 6 else None  # override val_horizon (shorter = faster on CPU)
 
 cfg = OmegaConf.load(f"{run_dir}/.hydra/config.yaml")
+if roll_len:
+    cfg.dataset.val_horizon = roll_len
 model = LatentWorldModel(cfg.algorithm)
 sd = torch.load(ckpt, map_location="cpu", weights_only=False)
 missing, unexpected = model.load_state_dict(sd["state_dict"], strict=False)
