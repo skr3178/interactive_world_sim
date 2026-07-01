@@ -23,6 +23,48 @@ in-world-model success rate and real-robot success rate on held-out policies.**
 
 ---
 
+## Adaptations summary (qcez folding → interactive_world_sim)
+
+Everything we changed to fit the external qcez folding dataset into this project's original scope
+and directory. Philosophy: **adapt *to* the project's ALOHA/EEF conventions, don't fork them** —
+reuse `RealAlohaDataset`, `bimanual_rope`-style FK actions, and the 3-stage pipeline; isolate
+dataset-specific logic to a converter + one new `action_mode` + config.
+
+**1. Data format (LeRobot → iws HDF5)** — project wants ALOHA HDF5; qcez is LeRobot v2.1 parquet
+(PNG-in-parquet). `scripts/batch_convert_folding.py`: decode `cam_high` PNGs → `obs/images/cam_high`
+`(T,128,128,3)`; `observation.state` → `obs/joint_pos`; write iws layout (identity `world_t_robot_base`
+stub). 224→128, 180/20 split → `data/folding/{train,val}`.
+
+**2. Action = EEF `bimanual_fold`** (Decision D1) — new `ctrl_mode="bimanual_fold"` in
+`utils/action_utils.py` (FK via `KinHelper("trossen_vx300s")` → 8-dim per-arm XYZ+gripper) with a
+folding-fit clip box `x[0.23,0.68] y[-0.45,0.50] z[-0.47,0.18]` (0% clip on all 200 eps).
+
+**3. Frame rate = subsample action too** (Decision D2) — qcez 50 fps vs project ~10 Hz →
+`skip_frame=5` for Stage 2/3 (10 fps), `=1` for Stage 1. `keys_to_keep_intermediate=[]` (2 spots in
+`real_aloha_dataset.py`) so the action decimates *with* frames → 8-dim (not 40-dim concat); alignment
+verified (`skip5[i]==skip1[i×5]`).
+
+**4. Config/registry** — `configurations/dataset/folding_dataset.yaml` (`obs_keys=[cam_high]`,
+`action` `[8]`, `action_mode=bimanual_fold`, res 128); registered `folding_dataset=RealAlohaDataset`
+in `exp_latent_dyn.py`.
+
+**5. Logging: wandb → CSV** — wandb offline crashed (sentry-go race). `exp_base.py` uses Lightning
+`CSVLogger` when wandb disabled; guarded wandb-only `log_video` in `latent_world_model.py`; plot
+scripts read `metrics.csv`. All commands `wandb.mode=disabled`.
+
+**6. Infra (Blackwell / 24 GB)** — cu128 env; `batch 4` (16 OOMs on Stage 1); `torch.load(weights_only=
+False)`; `use_cache=false` (stale `camera_1_color` key); long runs launched under **tmux** (survive
+session teardown); checkpoint names with `=` break hydra → copy to clean name (`stage1_final.ckpt`);
+`save_last` needs `+` prefix.
+
+**Files** — *Added:* `scripts/{batch_convert_folding,convert_lerobot_to_iws,render_recon,plot_loss,
+live_loss_plot,check_clip_bounds,run_stage2}`, `configurations/dataset/folding_dataset.yaml`,
+`command.md`, `PIPELINE_PLAN.md`, `data/folding[_raw]/`. *Modified (5 src):* `utils/action_utils.py`,
+`datasets/latent_dynamics/real_aloha_dataset.py`, `experiments/exp_latent_dyn.py`,
+`experiments/exp_base.py`, `algorithms/latent_dynamics/latent_world_model.py`.
+
+---
+
 ## 2. Dataset decision
 
 ### Selected: **`qcez/folding_clothes_200_1_14_lerobot`** (Option A)
@@ -325,6 +367,51 @@ Stop when these plateau; as of step ~12k they have not.
 (2) `checkpointing.save_last` needs `+` prefix (not in struct). (3) `use_cache=true` errors on a
 stale `camera_1_color` key → use `use_cache=false`. (4) `torch.load` needs `weights_only=False`
 (ckpt holds OmegaConf objects). (5) batch 16 OOMs (24 GB) → batch 4.
+
+**⚠️ This 45-ep run died at ~step 15k (external kill, no crash trace) still at PSNR ~19** — i.e.
+*right before* the phase transition seen in the 200-ep run below. So the "plateau at ~21" was
+likely **undertraining, not a hard data ceiling.**
+
+---
+
+## 5d. Stage 1 on 200 eps — near-perfect via phase transition  *(2026-07-01)*
+
+**Run:** all 200 eps (180 train / 20 val), batch 4, `skip_frame=1`, val+ckpt every 3k.
+**wandb DISABLED → local `CSVLogger`** (`<run_dir>/metrics/version_0/metrics.csv`).
+Run dir: `outputs/2026-07-01/12-54-48`.
+
+**Validation trajectory — flat, then a sharp jump:**
+
+| step | PSNR | SSIM | MSE |
+|---|---|---|---|
+| 3k | 18.7 | 0.32 | 0.054 |
+| 6k | 19.7 | 0.38 | 0.043 |
+| 9k | 19.5 | 0.49 | 0.045 |
+| 12k | 17.2 | 0.46 | 0.075 |
+| **15k** | **35.0** | **0.83** | **0.0013** |
+
+A **consistency-decoder phase transition at ~step 15k**: plateaued 18–20 for 3k→12k, then jumped to
+near-perfect (past the PSNR 30 target). **Verified real** by an independent 8-frame render
+(MSE **0.0017** ≈ PSNR ~28; reconstruction visually crisp — garment folds/edges/arms sharp, vs the
+45-ep grainy plateau).
+
+**Checkpoint to use for Stage 2:** `outputs/2026-07-01/12-54-48/checkpoints/epoch=0-step=15000.ckpt`
+(+ `last.ckpt`) — the near-perfect Stage-1 autoencoder. Run was killed at step 15,399 (external, no
+trace) *after* the transition, so the good checkpoint is saved. **Stage 1 gate = met.**
+
+**Data-scale note:** can't cleanly A/B whether 200 eps *caused* the earlier transition (the 45-ep
+run died at ~15k before its own would-be transition). But the 200-ep run demonstrably reached a
+reconstruction quality the 45-ep run never showed.
+
+**Session-death pattern (use tmux for long runs):** three long runs died at session boundaries —
+45-ep @15k (no trace), 200-ep-v1 @2.5k (wandb sentry-go `concurrent map` race), 200-ep-v2 @15.4k
+(no trace). `setsid`/`nohup` detaches (PPID=1) but the harness still kills on session teardown →
+**launch long runs from a user-owned `tmux`/`screen` session** to guarantee survival.
+
+**wandb → CSV logging (fix for the sentry crash):** `exp_base.py` uses a Lightning `CSVLogger` when
+wandb is disabled; `latent_world_model.py` guards the wandb-only `log_video` (try/except);
+`scripts/plot_loss.py` + `scripts/live_loss_plot.py` now read `metrics.csv`. All commands use
+`wandb.mode=disabled`.
 
 ---
 
