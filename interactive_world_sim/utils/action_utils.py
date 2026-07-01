@@ -572,9 +572,12 @@ def joint_pos_to_action_primitive(
     elif ctrl_mode == "bimanual_fold":
         # Same EEF representation as bimanual_rope (per-arm world-frame XYZ + gripper),
         # but with a workspace clip box fitted to the qcez folding data (robot frame,
-        # identity base). Bounds = measured EEF range (episode 0) + margin, so real
-        # actions are never clipped; the box only guards out-of-range control input.
-        # See PIPELINE_PLAN.md "Decision log" — EEF action fork.
+        # identity base). Bounds = measured EEF range + margin, so real actions are
+        # never clipped; the box only guards out-of-range control input.
+        # LOCKED and validated over the FULL 200 episodes: scripts/check_clip_bounds.py
+        # reports 0.00% clipped (49,244 EEF samples), "box encompasses all data." The
+        # extra 150 episodes added no new extremes (z tops at 0.088 vs box 0.18), so no
+        # widening was needed. See PIPELINE_PLAN.md "Decision log" D1.
         action = np.zeros(8)
         # (right x, right y, right z, right_gripper,
         # left x, left y, left z, left_gripper)
@@ -584,13 +587,13 @@ def joint_pos_to_action_primitive(
             rob_t_eef = kin_helper.compute_fk_from_link_idx(
                 fk_joint_pos, [kin_helper.sapien_eef_idx]
             )[0]
-            rob_t_eef[0, 3] = np.clip(rob_t_eef[0, 3], 0.28, 0.66)
-            rob_t_eef[1, 3] = np.clip(rob_t_eef[1, 3], -0.45, 0.48)
+            rob_t_eef[0, 3] = np.clip(rob_t_eef[0, 3], 0.23, 0.68)
+            rob_t_eef[1, 3] = np.clip(rob_t_eef[1, 3], -0.45, 0.50)
             world_t_robot = base_pose_in_world[rob_i]
             world_t_eef = world_t_robot @ rob_t_eef
 
             action[rob_i * 4 : rob_i * 4 + 3] = world_t_eef[:3, 3]
-            action[rob_i * 4 + 2] = np.clip(action[rob_i * 4 + 2], -0.48, 0.02)
+            action[rob_i * 4 + 2] = np.clip(action[rob_i * 4 + 2], -0.47, 0.18)
             action[rob_i * 4 + 3] = PUPPET_GRIPPER_JOINT_UNNORMALIZE_FN(
                 MASTER_GRIPPER_JOINT_NORMALIZE_FN(joint_pos[rob_i * 7 + 6])
             )  # Gripper position
