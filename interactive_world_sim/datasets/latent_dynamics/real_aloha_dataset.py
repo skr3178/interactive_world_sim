@@ -464,7 +464,10 @@ class RealAlohaDataset(BaseImageDataset):
             goal_sample=cfg.goal_sample,
             keys=all_keys,
             skip_frame=cfg.skip_frame,
-            keys_to_keep_intermediate=["action"],
+            # D2: subsample the action like frames (every skip_frame-th, 8-dim) instead of
+            # concatenating (skip_frame*8). Valid because our action is an absolute EEF pose
+            # target — subsampling is lossless. See PIPELINE_PLAN.md Decision D2.
+            keys_to_keep_intermediate=[],
         )
 
         self.shape_meta = shape_meta
@@ -548,7 +551,7 @@ class RealAlohaDataset(BaseImageDataset):
             skip_idx=self.skip_idx,
             goal_sample=self.goal_sample,
             skip_frame=self.skip_frame,
-            keys_to_keep_intermediate=["action"],
+            keys_to_keep_intermediate=[],  # D2: subsample action like frames (see above)
         )
         val_set.train_mask = val_mask
         return val_set

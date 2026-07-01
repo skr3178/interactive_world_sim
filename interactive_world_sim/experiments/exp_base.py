@@ -15,6 +15,7 @@ import hydra
 import lightning.pytorch as pl
 import torch
 from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
+from lightning.pytorch.loggers import CSVLogger
 from lightning.pytorch.loggers.wandb import WandbLogger
 from lightning.pytorch.strategies.ddp import DDPStrategy
 from lightning.pytorch.utilities.types import TRAIN_DATALOADERS
@@ -203,9 +204,25 @@ class BaseLightningExperiment(BaseExperiment):
                 )
             )
 
+        # When wandb is disabled (self.logger is None), log scalars to a local CSV
+        # (<run_dir>/metrics/version_0/metrics.csv) so metrics are pullable without wandb.
+        run_logger = self.logger
+        if run_logger is None:
+            run_logger = CSVLogger(
+                save_dir=str(
+                    pathlib.Path(
+                        hydra.core.hydra_config.HydraConfig.get()["runtime"][
+                            "output_dir"
+                        ]
+                    )
+                ),
+                name="metrics",
+                flush_logs_every_n_steps=100,
+            )
+
         trainer = pl.Trainer(
             accelerator="auto",
-            logger=self.logger if self.logger else False,
+            logger=run_logger,
             devices=self.cfg.num_devices,
             num_nodes=self.cfg.num_nodes,
             strategy=(

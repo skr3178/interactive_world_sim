@@ -16,7 +16,7 @@ RAW = f"{REPO}/data/folding_raw/data/chunk-000"
 OUT = f"{REPO}/data/folding"
 CAM = "observation.images.cam_high"
 RES = 128
-N_TRAIN = 45  # remaining -> val
+N_TRAIN = 180  # first 180 eps -> train, remaining 20 -> val (10%, matches val_ratio 0.1)
 
 
 def decode(cell):

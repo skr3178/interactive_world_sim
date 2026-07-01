@@ -752,15 +752,19 @@ class LatentWorldModel(BasePytorchAlgo):
         xs_pred = torch.cat(xs_pred_ls, 1)
         xs = torch.cat(xs_ls, 1)
 
-        if self.logger:
-            log_video(
-                xs_pred,
-                xs.clone(),
-                step=None if namespace == "test" else self.global_step,
-                namespace=namespace + "_vis",
-                context_frames=0,
-                logger=self.logger.experiment,
-            )
+        if self.logger is not None:
+            try:
+                log_video(
+                    xs_pred,
+                    xs.clone(),
+                    step=None if namespace == "test" else self.global_step,
+                    namespace=namespace + "_vis",
+                    context_frames=0,
+                    logger=self.logger.experiment,
+                )
+            except Exception:
+                # non-wandb logger (e.g. CSVLogger when wandb disabled) — skip video log
+                pass
 
         metric_dict = get_validation_metrics_for_videos(
             xs_pred,
